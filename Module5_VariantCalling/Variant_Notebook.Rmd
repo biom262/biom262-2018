@@ -1,0 +1,191 @@
+---
+title: "CMM262 Variant Notebook"
+output: html_notebook
+---
+
+In this notebook we will perform the varant calling and then analysis of the variants called from the exome of 12 isogenic cell lines: 4 untreated and 8 treated with carboplatin for 5 cycles. The 8 treated cell lines increase carboplaitn resistance 1.7 fold. 
+
+The variants were called using FreeBayes and filtered and annotated with variant tools. 
+
+### Preparation
+
+#### Annotating the variants 
+
+Here we propose to use the ANNOVAR pipeline to annoate the variants based RefSeg genes
+
+```{bash}
+
+annovar_path="../../MED263/resources/annovar"
+class_path="."
+$annovar_path/table_annovar.pl -vcfinput --nastring . --protocol refGene --operation g --buildver hg19 --outfile $class_path/filtered_variants_ann $class_path/filtered_variants_break.vcf $annovar_path/humandb/
+
+
+```
+
+#### Converting VCF to TSV
+
+first we can get some statistics on the VCF file. 
+
+```{bash}
+#vcfstats $class_path/filtered_variants_break.vcf > $class_path/filtered_variants_break.stat
+```
+
+Then we can convert to TSV
+
+```{bash}
+#vcf2tsv -g $class_path/filtered_variants_break.vcf > $class_path/filtered_variants_break.tsv
+```
+
+
+### Analysis
+
+Install and load the required packages. 
+
+```{r}
+#comment out the line below if you need to install the packages
+#install.packages(c("dplyr","tidyr","reshape2","ineq","ggplot2","pheatmap","matrixStats"))
+
+library(dplyr) # data wrangling and dataframe manipulation
+library(tidyr) # data wrangling and dataframe manipulation
+library(reshape2) # conversion between long and wide dataframe formats
+library(ggplot2) # versatile plotting package
+library(pheatmap) # clustering and plotting pretty heatmaps
+```
+
+#### import and analyze the variant table
+
+import the variants table converted to tsv. 
+```{r}
+myvariants<-read.delim("./filtered_variants_break.tsv",header=TRUE)
+```
+
+select the interesting fields. 
+```{r}
+myvariants <- myvariants %>% select(CHROM,POS,REF,ALT,SAMPLE,GT,GL,RO.1, AO.1)
+```
+
+Adding a new field for mutation ID
+```{r}
+myvariants <- myvariants %>% mutate(mutationID=paste(CHROM,POS,REF,ALT,sep=":"))
+```
+
+Number of variants per sample. Method 1 with Table
+```{r}
+table(myvariants$SAMPLE,myvariants$GT)
+```
+
+Number of variants per samples. Method 2 using dplyr
+```{r}
+myvariants %>% group_by(SAMPLE,GT) %>% summarize(count=length(mutationID))
+```
+
+ggplot can also be used to represent this summary
+
+```{r}
+ggplot(myvariants,aes(SAMPLE,fill=GT))+geom_bar()+theme(axis.text.x = element_text(angle=45,hjust=1))
+```
+
+We can also analyze the coverage of each allele and compare to the geontype called
+```{r}
+myvariants$RO.1<-as.numeric(myvariants$RO.1)
+myvariants$AO.1<-as.numeric(myvariants$AO.1)
+
+ggplot(myvariants,aes(RO.1,AO.1,col=GT))+geom_point()
+```
+
+We can also display the total coverage of the variants
+
+```{r}
+ggplot(myvariants,aes(RO.1+AO.1))+geom_histogram()
+```
+or display as boxplot, separating each genotype
+```{r}
+ggplot(myvariants,aes(GT,RO.1+AO.1))+geom_boxplot()
+```
+
+and adding individual points
+```{r}
+ggplot(myvariants,aes(GT,RO.1+AO.1))+geom_boxplot()+geom_jitter(width=0.1)
+```
+
+We can clearly see that some unknown GT have decent coverage. Let's investgate their Genotype likelyhood
+```{r}
+#extract all 3 likelhood
+myvariants <- myvariants %>% separate(GL,into=c("GLR","GLH","GLA"),",")
+
+#use the GL has a new variable and flatten the file using melt
+tmp<-myvariants %>% select(mutationID,SAMPLE,GT,GLA,GLH,GLR)
+likelyhood<-melt(tmp,id.vars=c("mutationID","SAMPLE","GT"),measure.vars=c("GLR","GLH","GLA"),variable.name="GL",value.name="value")
+likelyhood$value<-as.numeric(likelyhood$value)
+
+# then we can plot a box plot of the GL
+ggplot(likelyhood,aes(GT,value,fill=GL))+geom_boxplot()
+```
+
+the unknonw genotype have a smaller likelyhood. We can eliminate them for this exercise. using the function grepl (grep logical). Note: grepl is not a dplyr function and needs full daatframe reference. 
+```{r}
+myvariants<-myvariants %>% filter(!grepl("\\.",myvariants$GT))
+```
+
+
+#### import and format annotations
+
+Use the function read.delim to import the annotation table. The results is a dataframe. 
+```{r}
+
+myann<-read.delim("filtered_variants_ann.refGene.exonic_variant_function",header=FALSE)
+```
+
+Let's clean up the annotation by keeping only the columns of interest
+```{r}
+myann<- myann %>% select(V2,V3,V12,V13,V15,V16)
+colnames(myann)<-c("type","effect","CHROM","POS","REF","ALT")
+```
+
+Break down the effect column and take the first one
+```{r}
+myann<-myann %>% separate(effect,sep=",",into=c("effect"),extra="drop") 
+```
+
+Break down further to identify gene and mutations
+```{r}
+myann<-myann %>% separate(effect,sep=":",into=c("gene","transcript","exon","cMut","pMut"),extra="drop") 
+```
+
+In order to merge with variant table, we need the same mutation ID as the key
+```{r}
+myann<-myann %>% mutate(mutationID=paste(CHROM,POS,REF,ALT,sep=":"))
+```
+
+
+#### merging variants and annotations
+
+merging using left_join
+```{r}
+myjoin<-left_join(myvariants,myann)
+```
+
+plotting the matrix of gene x samples
+```{r fig.height=4,fig.width=5}
+ggplot(myjoin,aes(SAMPLE,gene,fill=GT))+geom_tile()+theme(axis.text.x = element_text(angle=45,hjust=1))
+```
+
+filtering out the homozygous reference (not variants) and summarizing the variant type in each gene
+
+```{r}
+myjoinVar<-myjoin %>% filter(GT!="0/0")
+countType<-myjoinVar %>% group_by(SAMPLE,type) %>% summarize(count=length(mutationID))
+```
+
+We can them display as barchart
+
+```{r}
+ggplot(myjoinVar, aes(SAMPLE,fill=type))+geom_bar()
+```
+
+Identify recurrently mutated genes
+```{r}
+recurrent<-myjoinVar %>% filter(type!="synonymous SNV" & type!="nonframeshift deletion" & type!="nonframeshift substitution") %>% select(gene,SAMPLE) %>% unique() %>% group_by(gene) %>% summarize(Nsample=length(SAMPLE))
+```
+
+
