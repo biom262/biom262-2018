@@ -1,0 +1,49 @@
+---
+title: "BIOM 262 Final Exam Question"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+
+You are part of a large consortium that is performing a genome-wide association
+study for a human trait. You have collected genotype data for case and control
+samples from all over the world and are now testing SNPs for a genetic association with case/control status.
+
+You make a quantile-quantile plot of the observed p-values for each SNP
+and observe something like the following:
+
+```{r}
+gwas.tab <- read.table("/Users/emily/Desktop/BIOM262_2017/GWAS.txt", header=T)
+
+expect.p <- 1:nrow(gwas.tab) / nrow(gwas.tab)
+obs.p <- gwas.tab$p.val
+qqplot(-log10(expect.p), -log10(obs.p),
+       xlab="expected -log10(p-values)",
+       ylab="observed -log10(p-values)")
+abline(a=0, b=1, col="red")
+```
+
+Next, you zoom in, to show the less extreme p-values in greater detail:
+
+```{r}
+qqplot(-log10(expect.p), -log10(obs.p),
+       ylim=c(0, 10),
+       xlab="expected -log10(p-values)",
+       ylab="observed -log10(p-values)")
+abline(a=0, b=1, col="red")
+
+```
+
+## Questions:
+
+*Q1:* Under the null hypothesis, how should the p-values be distributed (i.e. what distribution should they come from)?
+
+*Q2:* Do you notice a problem with the p-values from this plot?
+
+*Q3:* Why is this a problem?
+
+*Q4:* What could cause this problem with the p-values?
+
+*Q5:* How could you correct this problem?
+
